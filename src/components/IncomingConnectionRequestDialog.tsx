@@ -19,11 +19,16 @@ export const IncomingConnectionRequestDialog = () => {
   const handleAccept = async () => {
     if (!currentRequest) return;
 
+    // Close dialog immediately to prevent it staying open
+    setOpen(false);
+    
     const result = await acceptConnectionRequest(currentRequest.id, currentRequest.sender_id);
     
     if (result.success) {
-      setOpen(false);
       removeRequest(currentRequest.id);
+    } else {
+      // Reopen if failed
+      setOpen(true);
     }
   };
 
@@ -43,7 +48,14 @@ export const IncomingConnectionRequestDialog = () => {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      if (!isOpen) {
+        setOpen(false);
+        if (currentRequest) {
+          removeRequest(currentRequest.id);
+        }
+      }
+    }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Connection Request</DialogTitle>
