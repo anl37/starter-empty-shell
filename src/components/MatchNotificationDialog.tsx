@@ -4,7 +4,7 @@ import { useMatchNotifications } from "@/hooks/useMatchNotifications";
 import { IcebreakerScreen } from "@/components/IcebreakerScreen";
 import { Sparkles } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import { getDurhamVenues } from "@/lib/durham-venues";
+import { supabase } from "@/integrations/supabase/client";
 
 interface MeetingDetails {
   sharedEmojiCode: string;
@@ -19,31 +19,34 @@ export const MatchNotificationDialog = () => {
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetails | null>(null);
   const lastMatchId = useRef<string | null>(null);
 
-  // Generate meeting details only once per unique match
+  // Load meeting details from database
   useEffect(() => {
     if (newMatch && newMatch.matchId !== lastMatchId.current) {
       lastMatchId.current = newMatch.matchId;
       
-      // Generate emoji codes
-      const emojis = ["🐱", "☕", "🌿", "🪩", "🎨", "📚", "🎵", "🏃", "🧘", "🍕"];
-      const userEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-      const matchEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+      const loadMeetingDetails = async () => {
+        const { data, error } = await supabase
+          .from('matches')
+          .select('venue_name, landmark, meet_code, shared_emoji_code')
+          .eq('id', newMatch.matchId)
+          .single();
+        
+        if (error) {
+          console.error('[MatchNotification] Error loading meeting details:', error);
+          return;
+        }
+        
+        if (data) {
+          setMeetingDetails({
+            sharedEmojiCode: data.shared_emoji_code || '🎉🎊',
+            venueName: data.venue_name || 'Current location',
+            landmark: data.landmark || 'Main entrance',
+            meetCode: data.meet_code || 'MEET0000'
+          });
+        }
+      };
       
-      // Select venue and landmark
-      const venues = getDurhamVenues();
-      const venue = venues[Math.floor(Math.random() * Math.min(10, venues.length))];
-      
-      let selectedLandmark = "";
-      if (venue.landmarks && venue.landmarks.length > 0) {
-        selectedLandmark = venue.landmarks[Math.floor(Math.random() * venue.landmarks.length)];
-      }
-      
-      setMeetingDetails({
-        sharedEmojiCode: `${userEmoji}${matchEmoji}`,
-        venueName: venue.name,
-        landmark: selectedLandmark,
-        meetCode: `MEET${Math.floor(Math.random() * 10000)}`
-      });
+      loadMeetingDetails();
     }
   }, [newMatch]);
 

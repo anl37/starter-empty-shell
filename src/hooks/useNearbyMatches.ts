@@ -56,8 +56,8 @@ export const useNearbyMatches = ({ location, enabled }: UseNearbyMatchesOptions)
   }, [user]);
 
   // Auto-create match when users are near with shared interests
-  const createMatchIfNeeded = useCallback(async (otherUserId: string, sharedInterests: string[]) => {
-    if (!user || sharedInterests.length === 0) return;
+  const createMatchIfNeeded = useCallback(async (otherUserId: string, sharedInterests: string[], otherUserLat: number, otherUserLng: number) => {
+    if (!user || sharedInterests.length === 0 || !location) return;
 
     const pairId = generatePairId(user.id, otherUserId);
     const [uidA, uidB] = [user.id, otherUserId].sort();
@@ -66,7 +66,7 @@ export const useNearbyMatches = ({ location, enabled }: UseNearbyMatchesOptions)
       // Check if match already exists
       const { data: existing } = await supabase
         .from('matches')
-        .select('id, status')
+        .select('id, status, venue_name')
         .eq('pair_id', pairId)
         .maybeSingle();
 
@@ -81,7 +81,40 @@ export const useNearbyMatches = ({ location, enabled }: UseNearbyMatchesOptions)
           console.log('[Match] Updated existing match:', pairId);
         }
       } else {
-        // Create new match
+        // Calculate midpoint between the two users
+        const midLat = (location.lat + otherUserLat) / 2;
+        const midLng = (location.lng + otherUserLng) / 2;
+
+        // Geocode the midpoint to get venue name
+        let venueName = 'Current location';
+        let landmark = 'Main entrance';
+        let venueLat = midLat;
+        let venueLng = midLng;
+
+        try {
+          const { data: geocodeData } = await supabase.functions.invoke('geocode-location', {
+            body: { lat: midLat, lng: midLng }
+          });
+
+          if (geocodeData?.venueName) {
+            venueName = geocodeData.venueName;
+            venueLat = geocodeData.lat || midLat;
+            venueLng = geocodeData.lng || midLng;
+            
+            // Generate contextual landmark based on venue type
+            const { generateContextualLandmark } = await import('@/lib/meeting-location-utils');
+            landmark = generateContextualLandmark(venueName, geocodeData.types);
+          }
+        } catch (error) {
+          console.error('[Match] Error geocoding location:', error);
+        }
+
+        // Generate meeting details
+        const { generateEmojiCodes, generateMeetCode } = await import('@/lib/meeting-location-utils');
+        const sharedEmojiCode = generateEmojiCodes();
+        const meetCode = generateMeetCode();
+
+        // Create new match with meeting details
         const { error } = await supabase
           .from('matches')
           .insert({
@@ -90,18 +123,24 @@ export const useNearbyMatches = ({ location, enabled }: UseNearbyMatchesOptions)
             uid_b: uidB,
             shared_interests: sharedInterests,
             status: 'suggested',
+            venue_name: venueName,
+            landmark: landmark,
+            meet_code: meetCode,
+            shared_emoji_code: sharedEmojiCode,
+            venue_lat: venueLat,
+            venue_lng: venueLng,
           });
 
         if (error) {
           console.error('[Match] Error creating match:', error);
         } else if (FEATURE_FLAGS.debugPresenceLogging) {
-          console.log('[Match] Created new match:', pairId, sharedInterests);
+          console.log('[Match] Created new match:', pairId, { venueName, landmark, meetCode });
         }
       }
     } catch (error) {
       console.error('[Match] Unexpected error:', error);
     }
-  }, [user]);
+  }, [user, location]);
 
   // Query nearby users
   const queryNearby = useCallback(async () => {
@@ -168,7 +207,7 @@ export const useNearbyMatches = ({ location, enabled }: UseNearbyMatchesOptions)
         });
 
         // Auto-create match
-        await createMatchIfNeeded(profile.id, sharedInterests);
+        await createMatchIfNeeded(profile.id, sharedInterests, profile.lat, profile.lng);
       }
 
       // Sort by distance

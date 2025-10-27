@@ -45,32 +45,50 @@ export type Database = {
         Row: {
           created_at: string | null
           id: string
+          landmark: string | null
           last_seen_together_at: string | null
+          meet_code: string | null
           pair_id: string
+          shared_emoji_code: string | null
           shared_interests: string[]
           status: string
           uid_a: string
           uid_b: string
+          venue_lat: number | null
+          venue_lng: number | null
+          venue_name: string | null
         }
         Insert: {
           created_at?: string | null
           id?: string
+          landmark?: string | null
           last_seen_together_at?: string | null
+          meet_code?: string | null
           pair_id: string
+          shared_emoji_code?: string | null
           shared_interests?: string[]
           status?: string
           uid_a: string
           uid_b: string
+          venue_lat?: number | null
+          venue_lng?: number | null
+          venue_name?: string | null
         }
         Update: {
           created_at?: string | null
           id?: string
+          landmark?: string | null
           last_seen_together_at?: string | null
+          meet_code?: string | null
           pair_id?: string
+          shared_emoji_code?: string | null
           shared_interests?: string[]
           status?: string
           uid_a?: string
           uid_b?: string
+          venue_lat?: number | null
+          venue_lng?: number | null
+          venue_name?: string | null
         }
         Relationships: []
       }
