@@ -13,6 +13,7 @@ export const useMatchNotifications = () => {
   const { user } = useAuth();
   const [newMatch, setNewMatch] = useState<MatchNotification | null>(null);
   const processedMatchIds = useRef<Set<string>>(new Set());
+  const acceptedRequestIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user?.id) return;
@@ -21,6 +22,13 @@ export const useMatchNotifications = () => {
       // Skip if already processed
       if (processedMatchIds.current.has(match.id)) {
         console.log('Skipping duplicate match notification:', match.id);
+        return;
+      }
+
+      // Skip if this was from an accepted request (user already knows)
+      if (acceptedRequestIds.current.has(match.id)) {
+        console.log('Skipping notification for accepted request:', match.id);
+        acceptedRequestIds.current.delete(match.id);
         return;
       }
 
@@ -84,8 +92,13 @@ export const useMatchNotifications = () => {
     setNewMatch(null);
   };
 
+  const suppressNotificationForAcceptedRequest = (matchId: string) => {
+    acceptedRequestIds.current.add(matchId);
+  };
+
   return {
     newMatch,
-    clearMatch
+    clearMatch,
+    suppressNotificationForAcceptedRequest
   };
 };
