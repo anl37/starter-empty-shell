@@ -55,92 +55,7 @@ export const useNearbyMatches = ({ location, enabled }: UseNearbyMatchesOptions)
     loadMyInterests();
   }, [user]);
 
-  // Auto-create match when users are near with shared interests
-  const createMatchIfNeeded = useCallback(async (otherUserId: string, sharedInterests: string[], otherUserLat: number, otherUserLng: number) => {
-    if (!user || sharedInterests.length === 0 || !location) return;
-
-    const pairId = generatePairId(user.id, otherUserId);
-    const [uidA, uidB] = [user.id, otherUserId].sort();
-
-    try {
-      // Check if match already exists
-      const { data: existing } = await supabase
-        .from('matches')
-        .select('id, status, venue_name')
-        .eq('pair_id', pairId)
-        .maybeSingle();
-
-      if (existing) {
-        // Update last_seen_together_at
-        await supabase
-          .from('matches')
-          .update({ last_seen_together_at: new Date().toISOString() })
-          .eq('id', existing.id);
-
-        if (FEATURE_FLAGS.debugPresenceLogging) {
-          console.log('[Match] Updated existing match:', pairId);
-        }
-      } else {
-        // Calculate midpoint between the two users
-        const midLat = (location.lat + otherUserLat) / 2;
-        const midLng = (location.lng + otherUserLng) / 2;
-
-        // Geocode the midpoint to get venue name
-        let venueName = 'Current location';
-        let landmark = 'Main entrance';
-        let venueLat = midLat;
-        let venueLng = midLng;
-
-        try {
-          const { data: geocodeData } = await supabase.functions.invoke('geocode-location', {
-            body: { lat: midLat, lng: midLng }
-          });
-
-          if (geocodeData?.venueName) {
-            venueName = geocodeData.venueName;
-            venueLat = geocodeData.lat || midLat;
-            venueLng = geocodeData.lng || midLng;
-            
-            // Generate contextual landmark based on venue type
-            const { generateContextualLandmark } = await import('@/lib/meeting-location-utils');
-            landmark = generateContextualLandmark(venueName, geocodeData.types);
-          }
-        } catch (error) {
-          console.error('[Match] Error geocoding location:', error);
-        }
-
-        // Generate meeting details
-        const { generateEmojiCodes, generateMeetCode } = await import('@/lib/meeting-location-utils');
-        const sharedEmojiCode = generateEmojiCodes();
-        const meetCode = generateMeetCode();
-
-        // Create new match with meeting details
-        const { error } = await supabase
-          .from('matches')
-          .insert({
-            pair_id: pairId,
-            uid_a: uidA,
-            uid_b: uidB,
-            shared_interests: sharedInterests,
-            status: 'suggested',
-            venue_name: venueName,
-            landmark: landmark,
-            meet_code: meetCode,
-            shared_emoji_code: sharedEmojiCode,
-            venue_lat: venueLat,
-            venue_lng: venueLng,
-          });
-
-        if (error) {
-          console.error('[Match] Error creating match:', error);
-        } else if (FEATURE_FLAGS.debugPresenceLogging) {
-          console.log('[Match] Created new match:', pairId, { venueName, landmark, meetCode });
-        }
-      }
-    } catch (error) {
-      console.error('[Match] Unexpected error:', error);
-    }
-  }, [user, location]);
+  // Note: Matches are now created only via connection requests, not automatically
 
   // Query nearby users
   const queryNearby = useCallback(async () => {
@@ -205,28 +120,18 @@ export const useNearbyMatches = ({ location, enabled }: UseNearbyMatchesOptions)
           emoji_signature: profile.emoji_signature || undefined,
           avatar_url: profile.avatar_url || undefined,
         });
-
-        // Auto-create match
-        await createMatchIfNeeded(profile.id, sharedInterests, profile.lat, profile.lng);
       }
 
       // Sort by distance
       nearby.sort((a, b) => a.distance - b.distance);
 
       setNearbyUsers(nearby);
-
-      if (FEATURE_FLAGS.debugPresenceLogging) {
-        console.log('[Nearby] Found users:', nearby.length, {
-          maxDistance: FEATURE_FLAGS.maxMatchDistanceMeters,
-          myLocation: { lat: location.lat.toFixed(5), lng: location.lng.toFixed(5) },
-        });
-      }
     } catch (error) {
       console.error('[Nearby] Unexpected error:', error);
     } finally {
       setLoading(false);
     }
-  }, [location, user, enabled, myInterests, createMatchIfNeeded]);
+  }, [location, user, enabled, myInterests]);
 
   // Query on location change
   useEffect(() => {

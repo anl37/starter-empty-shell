@@ -65,12 +65,60 @@ export const useConnectionRequest = () => {
         return { success: false };
       }
 
-      console.log('Receiver auto_accept_connections:', receiverProfile.auto_accept_connections);
+      
 
       // Explicitly check if auto-accept is enabled (must be true, not null or false)
       if (receiverProfile.auto_accept_connections === true) {
-        // Auto-accept: Create match directly
-        const pairId = [user.id, receiverId].sort().join('_');
+        // Auto-accept: Fetch locations and create match with meeting details
+        const { data: profiles, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, lat, lng')
+          .in('id', [user.id, receiverId]);
+
+        if (profileError || !profiles || profiles.length !== 2) {
+          toast.error("Failed to fetch user locations");
+          return { success: false };
+        }
+
+        const userProfile = profiles.find(p => p.id === user.id);
+        const receiverProfileData = profiles.find(p => p.id === receiverId);
+
+        if (!userProfile?.lat || !userProfile?.lng || !receiverProfileData?.lat || !receiverProfileData?.lng) {
+          toast.error("User locations not available");
+          return { success: false };
+        }
+
+        // Calculate midpoint
+        const midLat = (userProfile.lat + receiverProfileData.lat) / 2;
+        const midLng = (userProfile.lng + receiverProfileData.lng) / 2;
+
+        // Geocode the midpoint
+        let venueName = 'Current location';
+        let landmark = 'Main entrance';
+        let venueLat = midLat;
+        let venueLng = midLng;
+
+        try {
+          const { data: geocodeData } = await supabase.functions.invoke('geocode-location', {
+            body: { lat: midLat, lng: midLng }
+          });
+
+          if (geocodeData?.venueName) {
+            venueName = geocodeData.venueName;
+            venueLat = geocodeData.lat || midLat;
+            venueLng = geocodeData.lng || midLng;
+            
+            const { generateContextualLandmark } = await import('@/lib/meeting-location-utils');
+            landmark = generateContextualLandmark(venueName, geocodeData.types);
+          }
+        } catch (error) {
+          console.error('Error geocoding location:', error);
+        }
+
+        // Generate meeting details
+        const { generateEmojiCodes, generateMeetCode } = await import('@/lib/meeting-location-utils');
+        const sharedEmojiCode = generateEmojiCodes();
+        const meetCode = generateMeetCode();
         
         const { error: matchError } = await supabase
           .from('matches')
@@ -78,7 +126,13 @@ export const useConnectionRequest = () => {
             uid_a: user.id < receiverId ? user.id : receiverId,
             uid_b: user.id < receiverId ? receiverId : user.id,
             pair_id: pairId,
-            status: 'connected'
+            status: 'connected',
+            venue_name: venueName,
+            landmark: landmark,
+            meet_code: meetCode,
+            shared_emoji_code: sharedEmojiCode,
+            venue_lat: venueLat,
+            venue_lng: venueLng,
           });
 
         if (matchError) {
@@ -128,7 +182,57 @@ export const useConnectionRequest = () => {
 
     setIsLoading(true);
     try {
-      // Create match
+      // Fetch both users' locations
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, lat, lng')
+        .in('id', [user.id, senderId]);
+
+      if (profileError || !profiles || profiles.length !== 2) {
+        toast.error("Failed to fetch user locations");
+        return { success: false };
+      }
+
+      const userProfile = profiles.find(p => p.id === user.id);
+      const senderProfile = profiles.find(p => p.id === senderId);
+
+      if (!userProfile?.lat || !userProfile?.lng || !senderProfile?.lat || !senderProfile?.lng) {
+        toast.error("User locations not available");
+        return { success: false };
+      }
+
+      // Calculate midpoint
+      const midLat = (userProfile.lat + senderProfile.lat) / 2;
+      const midLng = (userProfile.lng + senderProfile.lng) / 2;
+
+      // Geocode the midpoint to get venue name
+      let venueName = 'Current location';
+      let landmark = 'Main entrance';
+      let venueLat = midLat;
+      let venueLng = midLng;
+
+      try {
+        const { data: geocodeData } = await supabase.functions.invoke('geocode-location', {
+          body: { lat: midLat, lng: midLng }
+        });
+
+        if (geocodeData?.venueName) {
+          venueName = geocodeData.venueName;
+          venueLat = geocodeData.lat || midLat;
+          venueLng = geocodeData.lng || midLng;
+          
+          const { generateContextualLandmark } = await import('@/lib/meeting-location-utils');
+          landmark = generateContextualLandmark(venueName, geocodeData.types);
+        }
+      } catch (error) {
+        console.error('Error geocoding location:', error);
+      }
+
+      // Generate meeting details
+      const { generateEmojiCodes, generateMeetCode } = await import('@/lib/meeting-location-utils');
+      const sharedEmojiCode = generateEmojiCodes();
+      const meetCode = generateMeetCode();
+
       const pairId = [user.id, senderId].sort().join('_');
       
       // Check if match already exists
@@ -139,30 +243,42 @@ export const useConnectionRequest = () => {
         .maybeSingle();
 
       if (existingMatch) {
-        // Update existing match to connected
+        // Update existing match to connected with meeting details
         const { error: updateMatchError } = await supabase
           .from('matches')
-          .update({ status: 'connected' })
+          .update({ 
+            status: 'connected',
+            venue_name: venueName,
+            landmark: landmark,
+            meet_code: meetCode,
+            shared_emoji_code: sharedEmojiCode,
+            venue_lat: venueLat,
+            venue_lng: venueLng,
+          })
           .eq('id', existingMatch.id);
 
         if (updateMatchError) {
-          console.error('Error updating existing match:', updateMatchError);
           toast.error("Failed to update connection");
           return { success: false };
         }
       } else {
-        // Create new match
+        // Create new match with meeting details
         const { error: matchError } = await supabase
           .from('matches')
           .insert({
             uid_a: user.id < senderId ? user.id : senderId,
             uid_b: user.id < senderId ? senderId : user.id,
             pair_id: pairId,
-            status: 'connected'
+            status: 'connected',
+            venue_name: venueName,
+            landmark: landmark,
+            meet_code: meetCode,
+            shared_emoji_code: sharedEmojiCode,
+            venue_lat: venueLat,
+            venue_lng: venueLng,
           });
 
         if (matchError) {
-          console.error('Error creating match:', matchError);
           toast.error(`Failed to create connection: ${matchError.message}`);
           return { success: false };
         }
